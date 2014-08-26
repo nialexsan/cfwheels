@@ -14,6 +14,7 @@ import java.util.Collection;
 import java.util.concurrent.TimeUnit;
 
 import org.junit.AfterClass;
+import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -33,6 +34,7 @@ public class CFWheelsCoreIT {
 	static private CustomHtmlUnitDriver driver;
 	static private String baseUrl;
 	static private boolean testOracleEmulation;
+	static private String currentContextPath="";
 	private String contextPath;
 	private String packageName;
 
@@ -48,9 +50,13 @@ public class CFWheelsCoreIT {
 	@Parameters(name="package {0}{1}")
     public static Collection<Object[]> getDirectories() {
     	Collection<Object[]> params = new ArrayList<Object[]>();
-    	addSubDirectories(params, "", "", "wheels/tests");
+    	addSubDirectories(params, "/", "", "wheels/tests");
 		if ("true".equals(System.getProperty("testSubfolder"))) {
-	    	addSubDirectories(params, "temp/", "", "wheels/tests");
+	    	addSubDirectories(params, "/subfolder/", "", "wheels/tests");
+		}
+		String secondPort=System.getProperty("testSecondPort");
+		if (secondPort != null) {
+	    	addSubDirectories(params, ":" + secondPort + "/", "", "wheels/tests");
 		}
 
     	return params;
@@ -87,8 +93,8 @@ public class CFWheelsCoreIT {
 
 		if (!Files.exists(path)) Files.createDirectory(path);
 		driver = new CustomHtmlUnitDriver();
-		baseUrl = "http://localhost:8080/";
-		if (null != System.getProperty("testServer")) baseUrl = System.getProperty("testServer") + "/";
+		baseUrl = "http://localhost:8080";
+		if (null != System.getProperty("testServer")) baseUrl = System.getProperty("testServer");
     	testOracleEmulation = Boolean.valueOf(System.getProperty("testOracleEmulation"));
 		driver.manage().timeouts().implicitlyWait(30000, TimeUnit.SECONDS);
 
@@ -103,7 +109,14 @@ public class CFWheelsCoreIT {
 			Files.write(Paths.get("target/failsafe-reports/_deploy.html"), pageSource.getBytes());
 		}
 
-		recreateTestDatabase();
+	}
+	
+	@Before
+	public void setUp() throws IOException {
+		if (! currentContextPath.equals(contextPath)) {
+			recreateTestDatabase();
+			currentContextPath = contextPath;
+		}
 	}
 
 	public static void main(String[] args) throws Exception {
@@ -130,7 +143,7 @@ public class CFWheelsCoreIT {
 			hitHomepageWithParallelRequest();
 		}
 		System.out.println("test database re-create");
-		driver.get(baseUrl + "index.cfm?controller=wheels&action=wheels&view=tests&type=core&reload=true&package=controller.caching");
+		driver.get(baseUrl + "/index.cfm?controller=wheels&action=wheels&view=tests&type=core&reload=true&package=controller.caching");
 		String postfix = "";
         String pageSource = driver.getPageSource();
         if (!pageSource.contains("Passed")) {
