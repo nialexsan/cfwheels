@@ -827,30 +827,27 @@
 		// make sure all of our associations are set properly before saving
 		$setAssociations();
 
-		if ($callback("beforeValidation", arguments.callbacks))
+		if (isNew())
 		{
-			if (isNew())
+			if ($validateAssociations() && $callback("beforeValidationOnCreate", arguments.callbacks) && $callback("beforeValidation", arguments.callbacks) && $validate("onSave,onCreate", arguments.validate) && $callback("afterValidation", arguments.callbacks) && $callback("afterValidationOnCreate", arguments.callbacks) && $callback("beforeSave", arguments.callbacks) && $callback("beforeCreate", arguments.callbacks))
 			{
-				if ($validateAssociations() && $callback("beforeValidationOnCreate", arguments.callbacks) && $validate("onSave,onCreate", arguments.validate) && $callback("afterValidation", arguments.callbacks) && $callback("afterValidationOnCreate", arguments.callbacks) && $callback("beforeSave", arguments.callbacks) && $callback("beforeCreate", arguments.callbacks))
+				$create(parameterize=arguments.parameterize, reload=arguments.reload);
+				if ($saveAssociations(argumentCollection=arguments) && $callback("afterCreate", arguments.callbacks) && $callback("afterSave", arguments.callbacks))
 				{
-					$create(parameterize=arguments.parameterize, reload=arguments.reload);
-					if ($saveAssociations(argumentCollection=arguments) && $callback("afterCreate", arguments.callbacks) && $callback("afterSave", arguments.callbacks))
-					{
-						$updatePersistedProperties();
-						loc.ret = true;
-					}
+					$updatePersistedProperties();
+					loc.ret = true;
 				}
 			}
-			else
+		}
+		else
+		{
+			if ($callback("beforeValidationOnUpdate", arguments.callbacks) && $callback("beforeValidation", arguments.callbacks) && $validate("onSave,onUpdate", arguments.validate) && $callback("afterValidation", arguments.callbacks) && $callback("afterValidationOnUpdate", arguments.callbacks) && $saveAssociations(argumentCollection=arguments) && $callback("beforeSave", arguments.callbacks) && $callback("beforeUpdate", arguments.callbacks))
 			{
-				if ($callback("beforeValidationOnUpdate", arguments.callbacks) && $validate("onSave,onUpdate", arguments.validate) && $callback("afterValidation", arguments.callbacks) && $callback("afterValidationOnUpdate", arguments.callbacks) && $saveAssociations(argumentCollection=arguments) && $callback("beforeSave", arguments.callbacks) && $callback("beforeUpdate", arguments.callbacks))
+				$update(parameterize=arguments.parameterize, reload=arguments.reload);
+				if ($callback("afterUpdate", arguments.callbacks) && $callback("afterSave", arguments.callbacks))
 				{
-					$update(parameterize=arguments.parameterize, reload=arguments.reload);
-					if ($callback("afterUpdate", arguments.callbacks) && $callback("afterSave", arguments.callbacks))
-					{
-						$updatePersistedProperties();
-						loc.ret = true;
-					}
+					$updatePersistedProperties();
+					loc.ret = true;
 				}
 			}
 		}
