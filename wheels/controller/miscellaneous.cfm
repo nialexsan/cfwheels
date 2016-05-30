@@ -1,21 +1,5 @@
 <!--- PUBLIC CONTROLLER REQUEST FUNCTIONS --->
 
-<cffunction name="pagination" returntype="struct" access="public" output="false">
-	<cfargument name="handle" type="string" required="false" default="query">
-	<cfscript>
-		var loc = {};
-		if (get("showErrorInformation"))
-		{
-			if (!StructKeyExists(request.wheels, arguments.handle))
-			{
-				$throw(type="Wheels.QueryHandleNotFound", message="CFWheels couldn't find a query with the handle of `#arguments.handle#`.", extendedInfo="Make sure your `findAll` call has the `page` argument specified and matching `handle` argument if specified.");
-			}
-		}
-		loc.rv = request.wheels[arguments.handle];
-	</cfscript>
-	<cfreturn loc.rv>
-</cffunction>
-
 <cffunction name="sendEmail" returntype="any" access="public" output="false">
 	<cfargument name="template" type="string" required="false" default="">
 	<cfargument name="from" type="string" required="false" default="">
@@ -24,14 +8,17 @@
 	<cfargument name="layout" type="any" required="false">
 	<cfargument name="file" type="string" required="false" default="">
 	<cfargument name="detectMultipart" type="boolean" required="false">
-	<cfargument name="$deliver" type="boolean" required="false" default="true">
+	<cfargument name="deliver" type="boolean" required="false" default="true">
+	<cfargument name="writeToFile" type="string" required="false" default="">
 	<cfscript>
 		var loc = {};
+		loc.deliver = Duplicate(arguments.deliver);
+		loc.writeToFile = Duplicate(arguments.writeToFile);
+
 		$args(args=arguments, name="sendEmail", combine="template/templates/!,layout/layouts,file/files", required="template,from,to,subject");
 
-		loc.nonPassThruArgs = "template,templates,layout,layouts,file,files,detectMultipart,$deliver";
-		loc.mailTagArgs = "from,to,bcc,cc,charset,debug,failto,group,groupcasesensitive,mailerid,maxrows,mimeattach,password,port,priority,query,replyto,server,spoolenable,startrow,subject,timeout,type,username,useSSL,useTLS,wraptext,remove";
-		loc.deliver = arguments.$deliver;
+		loc.nonPassThruArgs = "writetofile,template,templates,layout,layouts,file,files,detectMultipart,deliver,tagContent";
+		loc.mailTagArgs = "from,to,bcc,cc,charset,debug,failto,group,groupcasesensitive,mailerid,mailparams,maxrows,mimeattach,password,port,priority,query,replyto,server,spoolenable,startrow,subject,timeout,type,username,useSSL,useTLS,wraptext,remove";
 
 		// if two templates but only one layout was passed in we set the same layout to be used on both
 		if (ListLen(arguments.template) > 1 && ListLen(arguments.layout) == 1)
@@ -81,6 +68,10 @@
 			}
 		}
 
+		// return a struct containing mailpart content using type as the key
+		loc.rv = {};
+		loc.rv["html"] = "";
+		loc.rv["text"] = "";
 		// figure out if the email should be sent as html or text when only one template is used and the developer did not specify the type explicitly
 		if (ArrayLen(arguments.mailparts) == 1)
 		{
@@ -96,6 +87,15 @@
 				{
 					arguments.type = "text";
 				}
+			}
+			loc.rv[arguments.type] = arguments.tagContent;
+		}
+		else
+		{
+			// return a struct containing mailparts using type the the key
+			loc.iEnd = ArrayLen(arguments.mailparts);
+			for (loc.i=1; loc.i <= loc.iEnd; loc.i++) {
+				loc.rv[arguments.mailparts[loc.i].type] = arguments.mailparts[loc.i].tagContent;
 			}
 		}
 
@@ -125,19 +125,23 @@
 			StructDelete(arguments, loc.item);
 		}
 
+		// also return the args passed to cfmail
+		StructAppend(loc.rv, arguments);
+
+		// write the email body to file
+		if (Len(loc.writeToFile))
+		{
+			loc.output = ListAppend(loc.rv.text, loc.rv.html, "#Chr(13)##Chr(10)##Chr(13)##Chr(10)#");
+			$file(action="write", file="#loc.writeToFile#", output="#loc.output#");
+		}
+
 		// send the email using the cfmail tag
 		if (loc.deliver)
 		{
 			$mail(argumentCollection=arguments);
 		}
-		else
-		{
-			loc.rv = arguments;
-		}
 	</cfscript>
-	<cfif StructKeyExists(loc, "rv")>
-		<cfreturn loc.rv>
-	</cfif>
+	<cfreturn loc.rv>
 </cffunction>
 
 <cffunction name="sendFile" returntype="any" access="public" output="false">
@@ -151,46 +155,60 @@
 	<cfscript>
 		var loc = {};
 		$args(name="sendFile", args=arguments);
-		loc.relativeRoot = get("rootPath");
-		if (Right(loc.relativeRoot, 1) != "/")
-		{
-			loc.relativeRoot &= "/";
-		}
-		loc.root = ExpandPath(loc.relativeRoot);
-		loc.folder = arguments.directory;
-		if (!Len(loc.folder))
-		{
-			loc.folder = loc.relativeRoot & get("filePath");
-		}
-		if (Left(loc.folder, Len(loc.root)) == loc.root)
-		{
-			loc.folder = RemoveChars(loc.folder, 1, Len(loc.root));
-		}
-		loc.fullPath = Replace(loc.folder, "\", "/", "all");
-		loc.fullPath = ListAppend(loc.fullPath, arguments.file, "/");
-		loc.fullPath = ExpandPath(loc.fullPath);
-		loc.fullPath = Replace(loc.fullPath, "\", "/", "all");
-		loc.file = ListLast(loc.fullPath, "/");
-		loc.directory = Reverse(ListRest(Reverse(loc.fullPath), "/"));
 
-		// if the file is not found, try searching for it
-		if (!FileExists(loc.fullPath))
-		{
-			loc.match = $directory(action="list", directory=loc.directory, filter="#loc.file#.*");
-
-			// only extract the extension if we find a single match
-			if (loc.match.recordCount == 1)
+		// Check whether the resource is a ram resource or physical file
+		if(!listFirst(arguments.file, "://") EQ "ram"){
+			loc.relativeRoot = get("rootPath");
+			if (Right(loc.relativeRoot, 1) != "/")
 			{
-				loc.file &= "." & ListLast(loc.match.name, ".");
-				loc.fullPath = loc.directory & "/" & loc.file;
+				loc.relativeRoot &= "/";
 			}
-			else
+			loc.root = ExpandPath(loc.relativeRoot);
+			loc.folder = arguments.directory;
+			if (!Len(loc.folder))
 			{
-				$throw(type="Wheels.FileNotFound", message="A file could not be found.", extendedInfo="Make sure a file with the name `#loc.file#` exists in the `#loc.directory#` folder.");
+				loc.folder = loc.relativeRoot & get("filePath");
 			}
+			if (Left(loc.folder, Len(loc.root)) == loc.root)
+			{
+				loc.folder = RemoveChars(loc.folder, 1, Len(loc.root));
+			}
+			loc.fullPath = Replace(loc.folder, "\", "/", "all");
+			loc.fullPath = ListAppend(loc.fullPath, arguments.file, "/");
+			loc.fullPath = ExpandPath(loc.fullPath);
+			loc.fullPath = Replace(loc.fullPath, "\", "/", "all");
+			loc.file = ListLast(loc.fullPath, "/");
+			loc.directory = Reverse(ListRest(Reverse(loc.fullPath), "/"));
+
+			// if the file is not found, try searching for it
+			if (!FileExists(loc.fullPath))
+			{
+				loc.match = $directory(action="list", directory=loc.directory, filter="#loc.file#.*");
+
+				// only extract the extension if we find a single match
+				if (loc.match.recordCount == 1)
+				{
+					loc.file &= "." & ListLast(loc.match.name, ".");
+					loc.fullPath = loc.directory & "/" & loc.file;
+				}
+				else
+				{
+					$throw(type="Wheels.FileNotFound", message="A file could not be found.", extendedInfo="Make sure a file with the name `#loc.file#` exists in the `#loc.directory#` folder.");
+				}
+			}
+			loc.name = loc.file;
+		}
+		else {
+			loc.fullPath = arguments.file;
+			loc.file 	 = arguments.file;
+			// For ram:// resources, skip the physical file check but still check the thing exists
+			if (!FileExists(loc.fullPath)){
+				$throw(type="Wheels.FileNotFound", message="ram:// resource could not be found.", extendedInfo="Make sure a resource with the name `#loc.file#` exists in memory");
+			}
+			// Make the default display name behaviour the same as physical files
+			loc.name     = replace(arguments.file, "ram://","","one");
 		}
 
-		loc.name = loc.file;
 		loc.extension = ListLast(loc.file, ".");
 
 		// replace the display name for the file if supplied
@@ -282,3 +300,27 @@
 	</cfscript>
 	<cfreturn loc.rv>
 </cffunction>
+
+<cfscript>
+
+public boolean function isPut() {
+	return request.cgi.request_method == "put";
+}
+
+public boolean function isPatch() {
+	return request.cgi.request_method == "patch";
+}
+
+public boolean function isDelete() {
+	return request.cgi.request_method == "delete";
+}
+
+public boolean function isHead() {
+	return request.cgi.request_method == "head";
+}
+	
+public boolean function isOptions() {
+	return request.cgi.request_method == "options";
+}
+
+</cfscript>

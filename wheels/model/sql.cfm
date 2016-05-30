@@ -173,15 +173,20 @@
 	<cfscript>
 		var loc = {};
 		loc.rv = "";
-
-		// if we want a distinct statement, we can do it grouping every field in the select
+		loc.args = {};
+		loc.args.include = arguments.include;
+		loc.args.returnAs = arguments.returnAs;
+		loc.args.clause = "groupBy";
 		if (arguments.distinct)
 		{
-			loc.rv = $createSQLFieldList(list=arguments.select, include=arguments.include, returnAs=arguments.returnAs, renameFields=false);
+			// if we want a distinct statement, we can do it grouping every field in the select
+			loc.args.list = arguments.select;
+			loc.rv = $createSQLFieldList(argumentCollection=loc.args);
 		}
 		else if (Len(arguments.group))
 		{
-			loc.rv = $createSQLFieldList(list=arguments.group, include=arguments.include, returnAs=arguments.returnAs, renameFields=false);
+			loc.args.list = arguments.group;
+			loc.rv = $createSQLFieldList(argumentCollection=loc.args);
 		}
 		if (Len(loc.rv))
 		{
@@ -198,19 +203,18 @@
 	<cfargument name="returnAs" type="string" required="true">
 	<cfscript>
 		var loc = {};
-		loc.rv = $createSQLFieldList(list=arguments.select, include=arguments.include, includeSoftDeletes=arguments.includeSoftDeletes, returnAs=arguments.returnAs);
+		loc.rv = $createSQLFieldList(clause="select", list=arguments.select, include=arguments.include, includeSoftDeletes=arguments.includeSoftDeletes, returnAs=arguments.returnAs);
 		loc.rv = "SELECT " & loc.rv;
 	</cfscript>
 	<cfreturn loc.rv>
 </cffunction>
 
 <cffunction name="$createSQLFieldList" returntype="string" access="public" output="false">
+	<cfargument name="clause" type="string" required="true">
 	<cfargument name="list" type="string" required="true">
 	<cfargument name="include" type="string" required="true">
-	<cfargument name="includeSoftDeletes" type="boolean" required="false" default="false">
 	<cfargument name="returnAs" type="string" required="true">
-	<cfargument name="renameFields" type="boolean" required="false" default="true">
-	<cfargument name="addCalculatedProperties" type="boolean" required="false" default="true">
+	<cfargument name="includeSoftDeletes" type="boolean" required="false" default="false">
 	<cfargument name="useExpandedColumnAliases" type="boolean" required="false" default="#application.wheels.useExpandedColumnAliases#">
 	<cfscript>
 		var loc = {};
@@ -237,9 +241,15 @@
 			{
 				loc.classData = loc.classes[loc.i];
 				arguments.list = ListAppend(arguments.list, loc.classData.propertyList);
-				if (Len(loc.classData.calculatedPropertyList))
+				if (StructCount(loc.classData.calculatedProperties))
 				{
-					arguments.list = ListAppend(arguments.list, loc.classData.calculatedPropertyList);
+					for (loc.key in loc.classData.calculatedProperties)
+					{
+						if (loc.classData.calculatedProperties[loc.key].select)
+						{
+							arguments.list = ListAppend(arguments.list, loc.key);
+						}
+					}
 				}
 			}
 		}
@@ -277,7 +287,7 @@
 					{
 						// if expanded column aliases is enabled then mark all columns from included classes as duplicates in order to prepend them with their class name
 						loc.flagAsDuplicate = false;
-						if (arguments.renameFields)
+						if (arguments.clause == "select")
 						{
 							if (loc.duplicateCount)
 							{
@@ -312,18 +322,22 @@
 							else
 							{
 								loc.toAppend &= loc.classData.properties[loc.iItem].column;
-								if (arguments.renameFields)
+								if (arguments.clause == "select")
 								{
 									loc.toAppend &= " AS " & loc.iItem;
 								}
 							}
 						}
-						else if (ListFindNoCase(loc.classData.calculatedPropertyList, loc.iItem) && arguments.addCalculatedProperties)
+						else if (ListFindNoCase(loc.classData.calculatedPropertyList, loc.iItem))
 						{
-							loc.toAppend &= "(" & Replace(loc.classData.calculatedProperties[loc.iItem].sql, ",", "[[comma]]", "all") & ")";
-							if (arguments.renameFields)
+							loc.sql = Replace(loc.classData.calculatedProperties[loc.iItem].sql, ",", "[[comma]]", "all");
+							if (arguments.clause == "select" || !REFind("^(SELECT )?(AVG|COUNT|MAX|MIN|SUM)\(.*\)", loc.sql))
 							{
-								loc.toAppend &= " AS " & loc.iItem;
+								loc.toAppend &= "(" & loc.sql & ")";
+								if (arguments.clause == "select")
+								{
+									loc.toAppend &= " AS " & loc.iItem;
+								}
 							}
 						}
 						loc.addedPropertiesByModel[loc.classData.modelName] = ListAppend(loc.addedPropertiesByModel[loc.classData.modelName], loc.iItem);
@@ -334,14 +348,10 @@
 				{
 					loc.rv = ListAppend(loc.rv, loc.toAppend);
 				}
-				else if (application.wheels.showErrorInformation && (!arguments.addCalculatedProperties && !ListFindNoCase(loc.classData.calculatedPropertyList, loc.iItem)))
-				{
-					$throw(type="Wheels.ColumnNotFound", message="Wheels looked for the column mapped to the `#loc.iItem#` property but couldn't find it in the database table.", extendedInfo="Verify the `select` argument and/or your property to column mappings done with the `property` method inside the model's `init` method to make sure everything is correct.");
-				}
 			}
 
 			// let's replace eventual duplicates in the clause by prepending the class name
-			if (Len(arguments.include) && arguments.renameFields)
+			if (Len(arguments.include) && arguments.clause == "select")
 			{
 				loc.newSelect = "";
 				loc.addedProperties = "";
@@ -397,7 +407,7 @@
 		else
 		{
 			loc.rv = arguments.list;
-			if (!arguments.renameFields && Find(" AS ", loc.rv))
+			if (arguments.clause == "groupBy" && Find(" AS ", loc.rv))
 			{
 				loc.rv = REReplace(loc.rv, variables.wheels.class.RESQLAs, "", "all");
 			}
@@ -473,26 +483,31 @@
 					loc.jEnd = ArrayLen(loc.classes);
 					for (loc.j=1; loc.j <= loc.jEnd; loc.j++)
 					{
-						// defaults for cfqueryparam, will be overridden and set appropriately when a column mapping is found below
-						loc.param.type = "CF_SQL_CHAR";
 						loc.param.dataType = "char";
+						loc.param.type = "CF_SQL_CHAR";
 						loc.param.scale = 0;
 						loc.param.list = false;
-
 						loc.classData = loc.classes[loc.j];
-						if (!Find(".", loc.param.property) || ListFirst(loc.param.property, ".") == loc.classData.tableName)
+						loc.table = ListFirst(loc.param.property, ".");
+						loc.column = ListLast(loc.param.property, ".");
+						if (!Find(".", loc.param.property) || loc.table == loc.classData.tableName)
 						{
-							if (ListFindNoCase(loc.classData.propertyList, ListLast(loc.param.property, ".")))
+							if (ListFindNoCase(loc.classData.propertyList, loc.column))
 							{
-								loc.param.type = loc.classData.properties[ListLast(loc.param.property, ".")].type;
-								loc.param.dataType = loc.classData.properties[ListLast(loc.param.property, ".")].dataType;
-								loc.param.scale = loc.classData.properties[ListLast(loc.param.property, ".")].scale;
-								loc.param.column = loc.classData.tableName & "." & loc.classData.properties[ListLast(loc.param.property, ".")].column;
+								loc.param.column = loc.classData.tableName & "." & loc.classData.properties[loc.column].column;
+								loc.param.dataType = loc.classData.properties[loc.column].dataType;
+								loc.param.type = loc.classData.properties[loc.column].type;
+								loc.param.scale = loc.classData.properties[loc.column].scale;
 								break;
 							}
-							else if (ListFindNoCase(loc.classData.calculatedPropertyList, ListLast(loc.param.property, ".")))
+							else if (ListFindNoCase(loc.classData.calculatedPropertyList, loc.column))
 							{
-								loc.param.column = "(" & loc.classData.calculatedProperties[ListLast(loc.param.property, ".")].sql & ")";
+								loc.param.column = "(" & loc.classData.calculatedProperties[loc.column].sql & ")";
+								if (StructKeyExists(loc.classData.calculatedProperties[loc.column], "dataType"))
+								{
+									loc.param.dataType = loc.classData.calculatedProperties[loc.column].dataType;
+									loc.param.type = variables.wheels.class.adapter.$getType(loc.param.dataType);
+								}
 								break;
 							}
 						}

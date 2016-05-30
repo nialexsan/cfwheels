@@ -15,13 +15,14 @@
 		var loc = {};
 		$args(name="updateAll", args=arguments);
 		arguments.include = $listClean(arguments.include);
+		arguments.where = $cleanInList(arguments.where);
 		arguments.properties = $setProperties(argumentCollection=arguments, filterList="where,include,properties,reload,parameterize,instantiate,validate,transaction,callbacks,includeSoftDeletes", setOnModel=false);
 
 		// find and instantiate each object and call its update function
 		if (arguments.instantiate)
 		{
 			loc.rv = 0;
-			loc.objects = findAll(select=propertyNames(), where=arguments.where, include=arguments.include, reload=arguments.reload, parameterize=arguments.parameterize, callbacks=arguments.callbacks, includeSoftDeletes=arguments.includeSoftDeletes, returnIncluded=false, returnAs="objects");
+			loc.objects = findAll(where=arguments.where, include=arguments.include, reload=arguments.reload, parameterize=arguments.parameterize, callbacks=arguments.callbacks, includeSoftDeletes=arguments.includeSoftDeletes, returnIncluded=false, returnAs="objects");
 			loc.iEnd = ArrayLen(loc.objects);
 			for (loc.i=1; loc.i <= loc.iEnd; loc.i++)
 			{

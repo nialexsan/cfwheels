@@ -37,17 +37,28 @@
 			application.$wheels.serverVersion = server.coldfusion.productVersion;
 		}
 		loc.upgradeTo = $checkMinimumVersion(engine=application.$wheels.serverName, version=application.$wheels.serverVersion);
-		if (Len(loc.upgradeTo))
+		if (Len(loc.upgradeTo) && !StructKeyExists(this, "disableEngineCheck") && !StructKeyExists(url, "disableEngineCheck"))
 		{
-			$throw(type="Wheels.EngineNotSupported", message="#application.$wheels.serverName# #application.$wheels.serverVersion# is not supported by CFWheels.", extendedInfo="Please upgrade to version #loc.upgradeTo# or higher.");
+			if (IsBoolean(loc.upgradeTo))
+			{
+				$throw(type="Wheels.EngineNotSupported", message="#application.$wheels.serverName# #application.$wheels.serverVersion# is not supported by CFWheels.", extendedInfo="Please use Lucee or Adobe ColdFusion instead.");
+			}
+			else
+			{
+				$throw(type="Wheels.EngineNotSupported", message="#application.$wheels.serverName# #application.$wheels.serverVersion# is not supported by CFWheels.", extendedInfo="Please upgrade to version #loc.upgradeTo# or higher.");
+			}
 		}
 
 		// copy over the cgi variables we need to the request scope (since we use some of these to determine URL rewrite capabilities we need to be able to access them directly on application start for example)
 		request.cgi = $cgiScope();
 
 		// set up containers for routes, caches, settings etc
-		application.$wheels.version = "1.4";
-		application.$wheels.hostName = CreateObject("java", "java.net.InetAddress").getLocalHost().getHostName();
+		application.$wheels.version = "2.0";
+		try
+		{
+			application.$wheels.hostName = CreateObject("java", "java.net.InetAddress").getLocalHost().getHostName();
+		}
+		catch (any e) {}
 		application.$wheels.controllers = {};
 		application.$wheels.models = {};
 		application.$wheels.existingHelperFiles = "";
@@ -194,6 +205,7 @@
 		application.$wheels.tableNamePrefix = "";
 		application.$wheels.obfuscateURLs = false;
 		application.$wheels.reloadPassword = "";
+		application.$wheels.redirectAfterReload = false;
 		application.$wheels.softDeleteProperty = "deletedAt";
 		application.$wheels.timeStampOnCreateProperty = "createdAt";
 		application.$wheels.timeStampOnUpdateProperty = "updatedAt";
@@ -206,7 +218,13 @@
 		application.$wheels.setUpdatedAtOnCreate = true;
 		application.$wheels.useExpandedColumnAliases = false;
 		application.$wheels.modelRequireInit = false;
+		application.$wheels.showIncompatiblePlugins = true;
 		application.$wheels.booleanAttributes = "allowfullscreen,async,autofocus,autoplay,checked,compact,controls,declare,default,defaultchecked,defaultmuted,defaultselected,defer,disabled,draggable,enabled,formnovalidate,hidden,indeterminate,inert,ismap,itemscope,loop,multiple,muted,nohref,noresize,noshade,novalidate,nowrap,open,pauseonexit,readonly,required,reversed,scoped,seamless,selected,sortable,spellcheck,translate,truespeed,typemustmatch,visible";
+		if (ListFindNoCase("production,maintenance", application.$wheels.environment))
+		{
+			application.$wheels.redirectAfterReload = true;
+		}
+
 
 		// if session management is enabled in the application we default to storing flash data in the session scope, if not we use a cookie
 		if (StructKeyExists(this, "sessionManagement") && this.sessionManagement)
@@ -227,7 +245,7 @@
 		application.$wheels.cacheDatePart = "n";
 		application.$wheels.defaultCacheTime = 60;
 		application.$wheels.clearQueryCacheOnReload = true;
-		application.$wheels.clearServerCacheOnReload = true;
+		application.$wheels.clearTemplateCacheOnReload = true;
 		application.$wheels.cacheQueriesDuringRequest = true;
 
 		// possible formats for provides
@@ -278,7 +296,7 @@
 		application.$wheels.functions.hiddenField = {};
 		application.$wheels.functions.highlight = {delimiter=",", tag="span", class="highlight"};
 		application.$wheels.functions.hourSelectTag = {label="", labelPlacement="around", prepend="", append="", prependToLabel="", appendToLabel="", includeBlank=false, twelveHour=false};
-		application.$wheels.functions.imageTag = {};
+		application.$wheels.functions.imageTag = {onlyPath=true, host="", protocol="", port=0};
 		application.$wheels.functions.includePartial = {layout="", spacer="", dataFunction=true};
 		application.$wheels.functions.javaScriptIncludeTag = {type="text/javascript", head=false};
 		application.$wheels.functions.linkTo = {onlyPath=true, host="", protocol="", port=0};
@@ -349,11 +367,11 @@
 		$include(template="config/#application.$wheels.environment#/settings.cfm");
 
 		// clear query (cfquery) and page (cfcache) caches
-		if (application.$wheels.clearQueryCacheOnReload)
+		if (application.$wheels.clearQueryCacheOnReload or !StructKeyExists(application.$wheels, "cachekey"))
 		{
-			$objectcache(action="clear");
+			application.$wheels.cachekey = Hash(CreateUUID());
 		}
-		if (application.$wheels.clearServerCacheOnReload)
+		if (application.$wheels.clearTemplateCacheOnReload)
 		{
 			$cache(action="flush");
 		}
@@ -393,5 +411,44 @@
 
 		// run the developer's on application start code
 		$include(template="#application.wheels.eventPath#/onapplicationstart.cfm");
+
+		// Redirect away from reloads on GET requests.
+		if (application.wheels.redirectAfterReload && StructKeyExists(url, "reload") && cgi.REQUEST_METHOD == 'get')
+		{
+			if (StructKeyExists(cgi, "PATH_INFO") && Len(cgi.PATH_INFO))
+			{
+				loc.url = cgi.PATH_INFO;
+			}
+			else if (StructKeyExists(cgi, "PATH_INFO"))
+			{
+				loc.url = "/";
+			}
+			else
+			{
+				loc.url = cgi.SCRIPT_NAME;
+			}
+
+			loc.oldQueryString = ListToArray(cgi.QUERY_STRING, "&");
+			loc.newQueryString = ArrayNew(1);
+
+			for (loc.i = 1; loc.i <= ArrayLen(loc.oldQueryString); loc.i++)
+			{
+				loc.keyValue = loc.oldQueryString[loc.i];
+				loc.key = ListFirst(loc.keyValue, "=");
+
+				if (!ListFindNoCase("reload,password", loc.key))
+				{
+					ArrayAppend(loc.newQueryString, loc.keyValue);
+				}
+			}
+
+			if (ArrayLen(loc.newQueryString))
+			{
+				loc.queryString = ArrayToList(loc.newQueryString, '&');
+				loc.url = "#loc.url#?#loc.queryString#";
+			}
+
+			$location(url=loc.url, addToken=false);
+		}
 	</cfscript>
 </cffunction>

@@ -5,7 +5,9 @@
 	<cfargument name="username" type="string" required="false" default="">
 	<cfargument name="password" type="string" required="false" default="">
 	<cfscript>
-		StructAppend(variables.wheels.class.connection, arguments);
+		variables.wheels.class.datasource = arguments.datasource;
+		variables.wheels.class.username = arguments.username;
+		variables.wheels.class.password = arguments.password;
 	</cfscript>
 </cffunction>
 
@@ -51,6 +53,7 @@
 	<cfargument name="where" type="string" required="false">
 	<cfargument name="reload" type="boolean" required="false">
 	<cfargument name="parameterize" type="any" required="false">
+	<cfargument name="includeSoftDeletes" type="boolean" required="false">
 	<cfscript>
 		var loc = {};
 		$args(name="exists", args=arguments);
@@ -60,6 +63,7 @@
 		}
 		arguments.select = primaryKey();
 		arguments.returnAs = "query";
+		arguments.callbacks = false;
 		if (StructKeyExists(arguments, "key"))
 		{
 			loc.rv = findByKey(argumentCollection=arguments).recordCount;

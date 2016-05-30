@@ -39,6 +39,8 @@
 	<cfargument name="sql" type="string" required="false" default="">
 	<cfargument name="label" type="string" required="false" default="">
 	<cfargument name="defaultValue" type="string" required="false">
+	<cfargument name="select" type="boolean" required="false" default="true">
+	<cfargument name="dataType" type="string" required="false" default="char">
 	<cfscript>
 		// validate setup
 		if (Len(arguments.column) && Len(arguments.sql))
@@ -65,6 +67,8 @@
 		{
 			variables.wheels.class.mapping[arguments.name].type = "sql";
 			variables.wheels.class.mapping[arguments.name].value = arguments.sql;
+			variables.wheels.class.mapping[arguments.name].select = arguments.select;
+			variables.wheels.class.mapping[arguments.name].dataType = arguments.dataType;
 		}
 		if (Len(arguments.label))
 		{
@@ -221,9 +225,11 @@
 </cffunction>
 
 <cffunction name="properties" returntype="struct" access="public" output="false">
+	<cfargument name="simple" type="boolean" required="false" default="false">
 	<cfscript>
 		var loc = {};
 		loc.rv = {};
+		// loop through all properties and functions in the this scope
 		for (loc.key in this)
 		{
 			// we return anything that is not a function
@@ -234,9 +240,25 @@
 				{
 					loc.key = ListGetAt(propertyNames(), ListFindNoCase(propertyNames(), loc.key));
 				}
-
+				// if it's a nested property, apply this function recursively
+				if (IsObject(this[loc.key]) && arguments.simple)
+				{
+					loc.rv[loc.key] = this[loc.key].properties(argumentCollection=arguments);
+				}
+				// loop thru the array and apply this function to each item
+				else if (IsArray(this[loc.key]) && arguments.simple)
+				{
+					loc.rv[loc.key] = [];
+					for (loc.i=1; loc.i <= ArrayLen(this[loc.key]); loc.i++)
+					{
+						loc.rv[loc.key][loc.i] = this[loc.key][loc.i].properties(argumentCollection=arguments);
+					}
+				}
 				// set property from the this scope in the struct that we will return
-				loc.rv[loc.key] = this[loc.key];
+				else
+				{
+					loc.rv[loc.key] = this[loc.key];
+				}
 			}
 		}
 	</cfscript>
@@ -382,22 +404,25 @@
 		// loop through the properties and see if they can be set based off of the accessible properties lists
 		for (loc.key in arguments.properties)
 		{
-			loc.accessible = true;
-			if (arguments.$useFilterLists && StructKeyExists(variables.wheels.class.accessibleProperties, "whiteList") && !ListFindNoCase(variables.wheels.class.accessibleProperties.whiteList, loc.key))
+			if (StructKeyExists(arguments.properties, loc.key)) // required to ignore null keys
 			{
-				loc.accessible = false;
-			}
-			if (arguments.$useFilterLists && StructKeyExists(variables.wheels.class.accessibleProperties, "blackList") && ListFindNoCase(variables.wheels.class.accessibleProperties.blackList, loc.key))
-			{
-				loc.accessible = false;
-			}
-			if (loc.accessible)
-			{
-				loc.rv[loc.key] = arguments.properties[loc.key];
-			}
-			if (loc.accessible && arguments.setOnModel)
-			{
-				$setProperty(property=loc.key, value=loc.rv[loc.key]);
+				loc.accessible = true;
+				if (arguments.$useFilterLists && StructKeyExists(variables.wheels.class.accessibleProperties, "whiteList") && !ListFindNoCase(variables.wheels.class.accessibleProperties.whiteList, loc.key))
+				{
+					loc.accessible = false;
+				}
+				if (arguments.$useFilterLists && StructKeyExists(variables.wheels.class.accessibleProperties, "blackList") && ListFindNoCase(variables.wheels.class.accessibleProperties.blackList, loc.key))
+				{
+					loc.accessible = false;
+				}
+				if (loc.accessible)
+				{
+					loc.rv[loc.key] = arguments.properties[loc.key];
+				}
+				if (loc.accessible && arguments.setOnModel)
+				{
+					$setProperty(property=loc.key, value=loc.rv[loc.key]);
+				}
 			}
 		}
 
@@ -455,12 +480,22 @@
 <cffunction name="$setDefaultValues" returntype="any" access="public" output="false">
 	<cfscript>
 	var loc = {};
+	// persisted properties
 	for (loc.key in variables.wheels.class.properties)
 	{
 		if (StructKeyExists(variables.wheels.class.properties[loc.key], "defaultValue") && (!StructKeyExists(this, loc.key) || !Len(this[loc.key])))
 		{
 			// set the default value unless it is blank or a value already exists for that property on the object
 			this[loc.key] = variables.wheels.class.properties[loc.key].defaultValue;
+		}
+	}
+	// non-persisted properties
+	for (loc.key in variables.wheels.class.mapping)
+	{
+		if (StructKeyExists(variables.wheels.class.mapping[loc.key], "defaultValue") && (!StructKeyExists(this, loc.key) || !Len(this[loc.key])))
+		{
+			// set the default value unless it is blank or a value already exists for that property on the object
+			this[loc.key] = variables.wheels.class.mapping[loc.key].defaultValue;
 		}
 	}
 	</cfscript>

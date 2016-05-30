@@ -20,8 +20,8 @@
 		}
 
 		variables.wheels.class.RESQLAs = "[[:space:]]AS[[:space:]][A-Za-z1-9]+";
-		variables.wheels.class.RESQLOperators = "((?: (?:NOT )?LIKE)|(?: (?:NOT )?IN)|(?: IS(?: NOT)?)|(?:<>)|(?:<=)|(?:>=)|(?:!=)|(?:!<)|(?:!>)|=|<|>)";
-		variables.wheels.class.RESQLWhere = "(#variables.wheels.class.RESQLOperators# ?)(\('.+?'\)|\(((?:\+|-)?[0-9\.],?)+\)|'.+?'()|''|((?:\+|-)?[0-9\.]+)()|NULL)(($|\)| (AND|OR)))";
+		variables.wheels.class.RESQLOperators = "((?:\s+(?:NOT\s+)?LIKE)|(?:\s+(?:NOT\s+)?IN)|(?:\s+IS(?:\s+NOT)?)|(?:<>)|(?:<=)|(?:>=)|(?:!=)|(?:!<)|(?:!>)|=|<|>)";
+		variables.wheels.class.RESQLWhere = "\s*(#variables.wheels.class.RESQLOperators#)\s*(\('.+?'\)|\(((?:\+|-)?[0-9\.],?)+\)|'.+?'()|''|((?:\+|-)?[0-9\.]+)()|NULL)((\s*$|\)|\s+(AND|OR)))";
 		variables.wheels.class.mapping = {};
 		variables.wheels.class.properties = {};
 		variables.wheels.class.accessibleProperties = {};
@@ -29,7 +29,9 @@
 		variables.wheels.class.associations = {};
 		variables.wheels.class.callbacks = {};
 		variables.wheels.class.keys = "";
-		variables.wheels.class.connection = {datasource=application.wheels.dataSourceName, username=application.wheels.dataSourceUserName, password=application.wheels.dataSourcePassword};
+		variables.wheels.class.dataSource = application.wheels.dataSourceName;
+		variables.wheels.class.username = application.wheels.dataSourceUserName;
+		variables.wheels.class.password = application.wheels.dataSourcePassword;
 		variables.wheels.class.automaticValidations = application.wheels.automaticValidations;
 		setTableNamePrefix(get("tableNamePrefix"));
 		table(LCase(pluralize(variables.wheels.class.modelName)));
@@ -66,7 +68,7 @@
 		if (!IsBoolean(variables.wheels.class.tableName) || variables.wheels.class.tableName)
 		{
 			// load the database adapter
-			variables.wheels.class.adapter = $createObjectFromRoot(path="#application.wheels.wheelsComponentPath#", fileName="Connection", method="init", datasource="#variables.wheels.class.connection.datasource#", username="#variables.wheels.class.connection.username#", password="#variables.wheels.class.connection.password#");
+			variables.wheels.class.adapter = $assignAdapter();
 
 			// get columns for the table
 			loc.columns = variables.wheels.class.adapter.$getColumns(tableName());
@@ -182,6 +184,8 @@
 				variables.wheels.class.calculatedPropertyList = ListAppend(variables.wheels.class.calculatedPropertyList, loc.key);
 				variables.wheels.class.calculatedProperties[loc.key] = {};
 				variables.wheels.class.calculatedProperties[loc.key][variables.wheels.class.mapping[loc.key].type] = variables.wheels.class.mapping[loc.key].value;
+				variables.wheels.class.calculatedProperties[loc.key].select = variables.wheels.class.mapping[loc.key].select;
+				variables.wheels.class.calculatedProperties[loc.key].dataType = variables.wheels.class.mapping[loc.key].dataType;
 			}
 		}
 
@@ -216,6 +220,55 @@
 	</cfscript>
 	<cfreturn this>
 </cffunction>
+
+<cffunction name="$assignAdapter" returntype="any" access="public" output="false">
+	<cfscript>
+		var loc = {};
+		if (application.wheels.showErrorInformation)
+		{
+			try
+			{
+				loc.info = $dbinfo(dataSource=variables.wheels.class.dataSource, username=variables.wheels.class.username, password=variables.wheels.class.password, type="version");
+			}
+			catch (any e)
+			{
+				$throw(type="Wheels.DataSourceNotFound", message="The data source could not be reached.", extendedInfo="Make sure your database is reachable and that your data source settings are correct. You either need to setup a data source with the name `#variables.wheels.class.dataSource#` in the Administrator or tell CFWheels to use a different data source in `config/settings.cfm`.");
+			}
+		}
+		else
+		{
+			loc.info = $dbinfo(dataSource=variables.wheels.class.dataSource, username=variables.wheels.class.username, password=variables.wheels.class.password, type="version");
+		}
+		if (FindNoCase("SQLServer", loc.info.driver_name) || FindNoCase("SQL Server", loc.info.driver_name))
+		{
+			loc.adapterName = "SQLServer";
+		}
+		else if (FindNoCase("MySQL", loc.info.driver_name))
+		{
+			loc.adapterName = "MySQL";
+		}
+		else if (FindNoCase("Oracle", loc.info.driver_name))
+		{
+			loc.adapterName = "Oracle";
+		}
+		else if (FindNoCase("PostgreSQL", loc.info.driver_name))
+		{
+			loc.adapterName = "PostgreSQL";
+		}
+		else if (FindNoCase("H2", loc.info.driver_name))
+		{
+			loc.adapterName = "H2";
+		}
+		else
+		{
+			$throw(type="Wheels.DatabaseNotSupported", message="#loc.info.database_productname# is not supported by CFWheels.", extendedInfo="Use SQL Server, MySQL, Oracle, PostgreSQL or H2.");
+		}
+		loc.rv = CreateObject("component", "adapters.#loc.adapterName#").init(dataSource=variables.wheels.class.dataSource, username=variables.wheels.class.username, password=variables.wheels.class.password);
+		application.wheels.adapterName = loc.adapterName;
+	</cfscript>
+	<cfreturn loc.rv>
+</cffunction>
+
 
 <cffunction name="$initModelObject" returntype="any" access="public" output="false">
 	<cfargument name="name" type="string" required="true">
@@ -255,6 +308,7 @@
 		{
 			$updatePersistedProperties();
 		}
+		variables.wheels.instance.persistedOnInitialization = arguments.persisted;
 		loc.rv = this;
 	</cfscript>
 	<cfreturn loc.rv>

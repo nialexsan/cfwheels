@@ -101,6 +101,25 @@
 	<cfreturn arguments.value>
 </cffunction>
 
+<cffunction name="$cleanInlist" returntype="any" access="public" output="false">
+	<cfargument name="where" type="string" required="true">
+	<cfscript>
+		var loc = {};
+		loc.rv = arguments.where;
+		loc.regex = "IN\s?\(.*?,\s.*?\)";
+		loc.in = REFind(loc.regex, loc.rv, 1, true);
+		while (loc.in.len[1])
+		{
+			loc.str = Mid(loc.rv, loc.in.pos[1], loc.in.len[1]);
+			loc.rv = RemoveChars(loc.rv, loc.in.pos[1], loc.in.len[1]);
+			loc.cleaned = $listClean(loc.str);
+			loc.rv = Insert(loc.cleaned, loc.rv, loc.in.pos[1]-1);
+			loc.in = REFind(loc.regex, loc.rv, loc.in.pos[1] + Len(loc.cleaned), true);
+		}
+	</cfscript>
+	<cfreturn loc.rv>
+</cffunction>
+
 <cffunction name="$listClean" returntype="any" access="public" output="false" hint="removes whitespace between list elements. optional argument to return the list as an array.">
 	<cfargument name="list" type="string" required="true">
 	<cfargument name="delim" type="string" required="false" default=",">
@@ -146,7 +165,7 @@
 				loc.rv = SerializeJSON(loc.values);
 
 				// remove the characters that indicate array or struct so that we can sort it as a list below
-				loc.rv = ReplaceList(loc.rv, "{,},[,]", ",,,");
+				loc.rv = ReplaceList(loc.rv, "{,},[,],/", ",,,,");
 				loc.rv = ListSort(loc.rv, "text");
 			}
 			catch (any e)
@@ -238,11 +257,7 @@
 		for (loc.i=1; loc.i <= loc.iEnd; loc.i++)
 		{
 			loc.item = ListGetAt(arguments.keys, loc.i);
-			loc.rv[loc.item] = "";
-			if (StructKeyExists(arguments.scope, loc.item))
-			{
-				loc.rv[loc.item] = arguments.scope[loc.item];
-			}
+			loc.rv[loc.item] = arguments.scope[loc.item];
 		}
 
 		// fix path_info if it contains any characters that are not ascii (see issue 138)
@@ -262,7 +277,7 @@
 		}
 
 		// fixes IIS issue that returns a blank cgi.path_info
-		if (!Len(loc.rv.path_info))
+		if (!Len(loc.rv.path_info) && Right(loc.rv.script_name, 12) == "/rewrite.cfm")
 		{
 			if (Len(loc.rv.http_x_rewrite_url))
 			{
@@ -297,6 +312,12 @@
 					loc.rv.path_info = "/";
 				}
 			}
+		}
+
+		// some web servers incorrectly place rewrite.cfm in the path_info but since that should never be there we can safely remove it
+		if (Find("rewrite.cfm/", loc.rv.path_info))
+		{
+			Replace(loc.rv.path_info, "rewrite.cfm/", "");
 		}
 	</cfscript>
 	<cfreturn loc.rv>
@@ -911,6 +932,7 @@
 		loc.major = ListGetAt(loc.version, 1);
 		loc.minor = 0;
 		loc.patch = 0;
+		loc.build = 0;
 		if (ListLen(loc.version) > 1)
 		{
 			loc.minor = ListGetAt(loc.version, 2);
@@ -919,35 +941,46 @@
 		{
 			loc.patch = ListGetAt(loc.version, 3);
 		}
-		if (arguments.engine == "Railo")
+		if (ListLen(loc.version) > 3)
 		{
-			loc.minimumMajor = "3";
-			loc.minimumMinor = "1";
-			loc.minimumPatch = "2";
+			loc.build = ListGetAt(loc.version, 4);
 		}
-		else if (arguments.engine == "Lucee")
+		if (arguments.engine == "Lucee")
 		{
 			loc.minimumMajor = "4";
 			loc.minimumMinor = "5";
-			loc.minimumPatch = "0";
+			loc.minimumPatch = "1";
+			loc.minimumBuild = "022";
 		}
 		else if (arguments.engine == "Adobe ColdFusion")
 		{
-			loc.minimumMajor = "8";
+			loc.minimumMajor = "10";
 			loc.minimumMinor = "0";
-			loc.minimumPatch = "1";
-			loc.10 = {minimumMinor=0, minimumPatch=4};
+			loc.minimumPatch = "16";
+			loc.minimumBuild = "";
+			loc.11 = {minimumMinor=0, minimumPatch=5};
 		}
-		if (loc.major < loc.minimumMajor || (loc.major == loc.minimumMajor && loc.minor < loc.minimumMinor) || (loc.major == loc.minimumMajor && loc.minor == loc.minimumMinor && loc.patch < loc.minimumPatch))
+		else
 		{
-			loc.rv = loc.minimumMajor & "." & loc.minimumMinor & "." & loc.minimumPatch;
+			loc.rv = false;
 		}
-		if (StructKeyExists(loc, loc.major))
+		if (StructKeyExists(loc, "minimumMajor"))
 		{
-			// special requirements for having a specific minor or patch version within a major release exists
-			if (loc.minor < loc[loc.major].minimumMinor || (loc.minor == loc[loc.major].minimumMinor && loc.patch < loc[loc.major].minimumPatch))
+			if (loc.major < loc.minimumMajor || (loc.major == loc.minimumMajor && loc.minor < loc.minimumMinor) || (loc.major == loc.minimumMajor && loc.minor == loc.minimumMinor && loc.patch < loc.minimumPatch) || (loc.major == loc.minimumMajor && loc.minor == loc.minimumMinor && loc.patch == loc.minimumPatch && Len(loc.minimumBuild) && loc.build < loc.minimumBuild))
 			{
-				loc.rv = loc.major & "." & loc[loc.major].minimumMinor & "." & loc[loc.major].minimumPatch;
+				loc.rv = loc.minimumMajor & "." & loc.minimumMinor & "." & loc.minimumPatch;
+				if (Len(loc.minimumBuild))
+				{
+					loc.rv &= "." & loc.minimumBuild;
+				}
+			}
+			if (StructKeyExists(loc, loc.major))
+			{
+				// special requirements for having a specific minor or patch version within a major release exists
+				if (loc.minor < loc[loc.major].minimumMinor || (loc.minor == loc[loc.major].minimumMinor && loc.patch < loc[loc.major].minimumPatch))
+				{
+					loc.rv = loc.major & "." & loc[loc.major].minimumMinor & "." & loc[loc.major].minimumPatch;
+				}
 			}
 		}
 	</cfscript>
@@ -974,6 +1007,145 @@
 		if (StructKeyExists(application, "$wheels"))
 		{
 			loc.rv = "$wheels";
+		}
+	</cfscript>
+	<cfreturn loc.rv>
+</cffunction>
+
+<cffunction name="$singularizeOrPluralize" returntype="string" access="public" output="false">
+	<cfargument name="text" type="string" required="true">
+	<cfargument name="which" type="string" required="true">
+	<cfargument name="count" type="numeric" required="false" default="-1">
+	<cfargument name="returnCount" type="boolean" required="false" default="true">
+	<cfscript>
+		var loc = {};
+
+		// by default we pluralize/singularize the entire string
+		loc.text = arguments.text;
+
+		// keep track of the success of any rule matches
+		loc.ruleMatched = false;
+
+		// when count is 1 we don't need to pluralize at all so just set the return value to the input string
+		loc.rv = loc.text;
+
+		if (arguments.count != 1)
+		{
+
+			if (REFind("[A-Z]", loc.text))
+			{
+				// only pluralize/singularize the last part of a camelCased variable (e.g. in "websiteStatusUpdate" we only change the "update" part)
+				// also set a variable with the unchanged part of the string (to be prepended before returning final result)
+				loc.upperCasePos = REFind("[A-Z]", Reverse(loc.text));
+				loc.prepend = Mid(loc.text, 1, Len(loc.text)-loc.upperCasePos);
+				loc.text = Reverse(Mid(Reverse(loc.text), 1, loc.upperCasePos));
+			}
+			loc.uncountables = "advice,air,blood,deer,equipment,fish,food,furniture,garbage,graffiti,grass,homework,housework,information,knowledge,luggage,mathematics,meat,milk,money,music,pollution,research,rice,sand,series,sheep,soap,software,species,sugar,traffic,transportation,travel,trash,water,feedback";
+			loc.irregulars = "child,children,foot,feet,man,men,move,moves,person,people,sex,sexes,tooth,teeth,woman,women";
+			if (ListFindNoCase(loc.uncountables, loc.text))
+			{
+				loc.rv = loc.text;
+				loc.ruleMatched = true;
+			}
+			else if (ListFindNoCase(loc.irregulars, loc.text))
+			{
+				loc.pos = ListFindNoCase(loc.irregulars, loc.text);
+				if (arguments.which == "singularize" && loc.pos % 2 == 0)
+				{
+					loc.rv = ListGetAt(loc.irregulars, loc.pos-1);
+				}
+				else if (arguments.which == "pluralize" && loc.pos % 2 != 0)
+				{
+					loc.rv = ListGetAt(loc.irregulars, loc.pos+1);
+				}
+				else
+				{
+					loc.rv = loc.text;
+				}
+				loc.ruleMatched = true;
+			}
+			else
+			{
+				if (arguments.which == "pluralize")
+				{
+					loc.ruleList = "(quiz)$,\1zes,^(ox)$,\1en,([m|l])ouse$,\1ice,(matr|vert|ind)ix|ex$,\1ices,(x|ch|ss|sh)$,\1es,([^aeiouy]|qu)y$,\1ies,(hive)$,\1s,(?:([^f])fe|([lr])f)$,\1\2ves,sis$,ses,([ti])um$,\1a,(buffal|tomat|potat|volcan|her)o$,\1oes,(bu)s$,\1ses,(alias|status)$,\1es,(octop|vir)us$,\1i,(ax|test)is$,\1es,s$,s,$,s";
+				}
+				else if (arguments.which == "singularize")
+				{
+					loc.ruleList = "(quiz)zes$,\1,(matr)ices$,\1ix,(vert|ind)ices$,\1ex,^(ox)en,\1,(alias|status)es$,\1,([octop|vir])i$,\1us,(cris|ax|test)es$,\1is,(shoe)s$,\1,(o)es$,\1,(bus)es$,\1,([m|l])ice$,\1ouse,(x|ch|ss|sh)es$,\1,(m)ovies$,\1ovie,(s)eries$,\1eries,([^aeiouy]|qu)ies$,\1y,([lr])ves$,\1f,(tive)s$,\1,(hive)s$,\1,([^f])ves$,\1fe,(^analy)ses$,\1sis,((a)naly|(b)a|(d)iagno|(p)arenthe|(p)rogno|(s)ynop|(t)he)ses$,\1\2sis,([ti])a$,\1um,(n)ews$,\1ews,(.*)?ss$,\1ss,s$,#Chr(7)#";
+				}
+				loc.rules = ArrayNew(2);
+				loc.count = 1;
+				loc.iEnd = ListLen(loc.ruleList);
+				for (loc.i=1; loc.i <= loc.iEnd; loc.i=loc.i+2)
+				{
+					loc.rules[loc.count][1] = ListGetAt(loc.ruleList, loc.i);
+					loc.rules[loc.count][2] = ListGetAt(loc.ruleList, loc.i+1);
+					loc.count = loc.count + 1;
+				}
+				loc.iEnd = ArrayLen(loc.rules);
+				for (loc.i=1; loc.i <= loc.iEnd; loc.i++)
+				{
+					if(REFindNoCase(loc.rules[loc.i][1], loc.text))
+					{
+						loc.rv = REReplaceNoCase(loc.text, loc.rules[loc.i][1], loc.rules[loc.i][2]);
+						loc.ruleMatched = true;
+						break;
+					}
+				}
+				loc.rv = Replace(loc.rv, Chr(7), "", "all");
+			}
+
+			// this was a camelCased string and we need to prepend the unchanged part to the result
+			if (StructKeyExists(loc, "prepend") && loc.ruleMatched)
+			{
+				loc.rv = loc.prepend & loc.rv;
+			}
+		}
+
+		// return the count number in the string (e.g. "5 sites" instead of just "sites")
+		if (arguments.returnCount && arguments.count != -1)
+		{
+			loc.rv = LSNumberFormat(arguments.count) & " " & loc.rv;
+		}
+	</cfscript>
+	<cfreturn loc.rv>
+</cffunction>
+
+<cffunction name="$prependUrl" returntype="string" access="public" output="false">
+	<cfargument name="path" type="string" required="true">
+	<cfscript>
+		var loc = {};
+		loc.rv = arguments.path;
+		if (arguments.port != 0)
+		{
+			// use the port that was passed in by the developer
+			loc.rv = ":" & arguments.port & loc.rv;
+		}
+		else if (request.cgi.server_port != 80 && request.cgi.server_port != 443)
+		{
+			// if the port currently in use is not 80 or 443 we set it explicitly in the URL
+			loc.rv = ":" & request.cgi.server_port & loc.rv;
+		}
+		if (Len(arguments.host))
+		{
+			loc.rv = arguments.host & loc.rv;
+		}
+		else
+		{
+			loc.rv = request.cgi.server_name & loc.rv;
+		}
+		if (Len(arguments.protocol))
+		{
+			loc.rv = arguments.protocol & "://" & loc.rv;
+		}
+		else if (request.cgi.server_port_secure)
+		{
+			loc.rv = "https://" & loc.rv;
+		}
+		else
+		{
+			loc.rv = "http://" & loc.rv;
 		}
 	</cfscript>
 	<cfreturn loc.rv>

@@ -136,6 +136,10 @@
 	<cfreturn rv>
 </cffunction>
 
+<cffunction name="$file" returntype="any" access="public" output="false">
+	<cffile attributeCollection="#arguments#">
+</cffunction>
+
 <cffunction name="$throw" returntype="void" access="public" output="false">
 	<cfthrow attributeCollection="#arguments#">
 </cffunction>
@@ -200,10 +204,6 @@
 	<cfif arguments.abort>
 		<cfabort>
 	</cfif>
-</cffunction>
-
-<cffunction name="$objectcache" returntype="void" access="public" output="false">
-	<cfobjectcache attributeCollection="#arguments#">
 </cffunction>
 
 <cffunction name="$wddx" returntype="any" access="public" output="false">

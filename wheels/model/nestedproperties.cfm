@@ -39,6 +39,7 @@
 <!--- PRIVATE METHODS --->
 
 <cffunction name="$validateAssociations" returntype="boolean" access="public" output="false">
+	<cfargument name="callbacks" type="boolean" required="true">
 	<cfscript>
 		var loc = {};
 		loc.associations = variables.wheels.class.associations;
@@ -55,7 +56,7 @@
 				{
 					for (loc.i=1; loc.i <= ArrayLen(loc.array); loc.i++)
 					{
-						$invoke(componentReference=loc.array[loc.i], method="valid");
+						$invoke(componentReference=loc.array[loc.i], method="valid", invokeArgs=arguments);
 					}
 				}
 			}
@@ -78,7 +79,6 @@
 			if (loc.associations[loc.association].nested.allow && loc.associations[loc.association].nested.autoSave && StructKeyExists(this, loc.association))
 			{
 				loc.array = this[loc.association];
-
 				if (IsObject(this[loc.association]))
 				{
 					loc.array = [this[loc.association]];
@@ -96,17 +96,21 @@
 							$setForeignKeyValues(missingMethodArguments=loc.array[loc.i], keys=loc.info.foreignKey);
 						}
 						loc.saveResult = $invoke(componentReference=loc.array[loc.i], method="save", invokeArgs=arguments);
-
-						// don't change the return value if we have already received a false
 						if (loc.rv)
 						{
+							// don't change the return value when we have already received a false
 							loc.rv = loc.saveResult;
 						}
 					}
 				}
 			}
 		}
-	</cfscript>
+		if (!loc.rv)
+		{
+			// if the associations were not saved correctly, roll them back to their new state but keep the errors
+			$resetAssociationsToNew();
+		}
+		</cfscript>
 	<cfreturn loc.rv>
 </cffunction>
 
@@ -330,6 +334,69 @@
 				return "";
 			}
 			loc.rv = ListAppend(loc.rv, arguments.params[loc.key]);
+		}
+	</cfscript>
+	<cfreturn loc.rv>
+</cffunction>
+
+<cffunction name="$resetToNew" returntype="void" access="public" output="true">
+	<cfscript>
+		var loc = {};
+		if ($persistedOnInitialization())
+		{
+			return;
+		}
+
+		// remove the persisted properties container
+		StructDelete(variables, "$persistedProperties");
+
+		// remove any primary keys set by the save
+		loc.keys = primaryKeys();
+		loc.iEnd = ListLen(loc.keys);
+		for (loc.i=1; loc.i <= loc.iEnd; loc.i++)
+		{
+			loc.item = ListGetAt(loc.keys, loc.i);
+			StructDelete(this, loc.item);
+		}
+	</cfscript>
+</cffunction>
+
+<cffunction name="$resetAssociationsToNew" returntype="void" access="public" output="false">
+	<cfscript>
+		var loc = {};
+		loc.associations = variables.wheels.class.associations;
+		for (loc.association in loc.associations)
+		{
+			if (loc.associations[loc.association].nested.allow && loc.associations[loc.association].nested.autoSave && StructKeyExists(this, loc.association))
+			{
+				loc.array = this[loc.association];
+				if (IsObject(this[loc.association]))
+				{
+					loc.array = [this[loc.association]];
+				}
+				if (IsArray(loc.array))
+				{
+					loc.iEnd = ArrayLen(loc.array);
+					for (loc.i=1; loc.i <= loc.iEnd; loc.i++)
+					{
+						loc.array[loc.i].$resetToNew();
+					}
+				}
+			}
+		}
+	</cfscript>
+</cffunction>
+
+<cffunction name="$persistedOnInitialization" returntype="boolean" access="public" output="false">
+	<cfscript>
+		var loc = {};
+		if (StructKeyExists(variables.wheels.instance, "persistedOnInitialization") && variables.wheels.instance.persistedOnInitialization)
+		{
+			loc.rv = true;
+		}
+		else
+		{
+			loc.rv = false;
 		}
 	</cfscript>
 	<cfreturn loc.rv>

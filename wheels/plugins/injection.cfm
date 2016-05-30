@@ -23,22 +23,16 @@
 		{
 			if (!StructKeyExists(variables, "core"))
 			{
-				if (application[$wheels.appKey].serverName == "Railo")
-				{
-					// this is to work around a railo bug (https://jira.jboss.org/browse/RAILO-936)
-					// NB, fixed in Railo 3.2.0, so assume this is fixed in all lucee versions
-					variables.core = Duplicate(variables);
-				}
-				else
-				{
-					variables.core = {};
-					StructAppend(variables.core, variables);
-					StructDelete(variables.core, "$wheels");
-				}
+				variables.core = {};
+				StructAppend(variables.core, variables);
+				StructDelete(variables.core, "$wheels");
 			}
 			StructAppend(variables, application[$wheels.appKey].mixins[$wheels.className], true);
 		}
-		// get rid of any extra data created in the variables scope
-		StructDelete(variables, "$wheels");
+		if (StructKeyExists(variables, "$wheels"))
+		{
+			// get rid of any extra data created in the variables scope
+			StructDelete(variables, "$wheels");
+		}
 	}
 </cfscript>
